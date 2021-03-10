@@ -56,31 +56,73 @@ namespace TestFileSync
                 maWacha.IncludeSubdirectories = true;
                 maWacha.Filter = "*.*";
                 maWacha.NotifyFilter = NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.CreationTime;
-                maWacha.Changed += (source, e) => OnChanged(source, e, maPatha.DestinationPathFromXML);
-                maWacha.Created += (source, e) => OnChanged(source, e, maPatha.DestinationPathFromXML);
-                maWacha.Renamed += (source, e) => OnChanged(source, e, maPatha.DestinationPathFromXML);
+                maWacha.Changed += (source, e) => OnChanged(source, e, maPatha.DestinationPathFromXML, maPatha.SourcePathFromXML);
+                maWacha.Created += (source, e) => OnChanged(source, e, maPatha.DestinationPathFromXML, maPatha.SourcePathFromXML);
+                maWacha.Renamed += (source, e) => OnChanged(source, e, maPatha.DestinationPathFromXML, maPatha.SourcePathFromXML);
 
                 maWacha.EnableRaisingEvents = true;
             }
 
-            private static void OnChanged(object source, FileSystemEventArgs e, string myPath)
+            private static void OnChanged(object source, FileSystemEventArgs e, string myPath, string mySourcePath)
             {
                 //EventLog fileSyncOnchangeLog = new EventLog();
                 //fileSyncOnchangeLog.Source = "MaWacha";
                 //fileSyncOnchangeLog.Log = "WachaLoga";
-                bool chkRemoteHost = CheckPath(myPath); ;
-                bool chkDestFolder = CheckDestinationFolder(myPath);
-                string sourcefilePath = e.FullPath;
-                FileInfo fileInfo = new FileInfo(sourcefilePath);
-                string destFilePath = myPath;
-                string dFP = Path.Combine(destFilePath, e.Name);
-                string bodymsg = $"File copied from {e.FullPath} to {dFP}";
+                //bool chkRemoteHost = CheckPath(myPath); ;
+                //bool chkDestFolder = CheckDestinationFolder(myPath);
+                //string sourcefilePath = e.FullPath;
+                //FileInfo fileInfo = new FileInfo(sourcefilePath);
+                //string destFilePath = myPath;
+                //string dFP = Path.Combine(destFilePath, e.Name);
+                //string bodymsg = $"File copied from {e.FullPath} to {dFP}";
+
+                if (e.ChangeType == WatcherChangeTypes.Created)
+                {
+                    if (Directory.Exists(e.FullPath))
+                    {
+                        foreach (var file in Directory.GetFiles(e.FullPath))
+                        {
+                            Console.WriteLine(Path.GetFileName(file));
+                            var eventArgs = new FileSystemEventArgs(WatcherChangeTypes.Created, Path.GetDirectoryName(file), Path.GetFileName(file));
+                            OnChanged(source, eventArgs, myPath, mySourcePath);
+                        }
+                    }
+                    else
+                    {
+                        FileAttributes attributes = File.GetAttributes(e.FullPath);
+
+                        if (attributes.HasFlag(FileAttributes.Directory))
+                        {
+
+                            Console.WriteLine($"{e.FullPath} is directory", EventLogEntryType.Information);
+                        }
+                        else
+                        {
+                            FileInfo file = new FileInfo(e.FullPath);
+                            DirectoryInfo directory = file.Directory;
+                            
+                            if (file.DirectoryName.Equals(mySourcePath))
+                            {
+                                while (IsFileLocked(file))
+                                {
+                                    Thread.Sleep(500);
+                                }
+                                file.CopyTo(Path.Combine(myPath, file.Name));
+                            }
+                            else
+                            {
+                                while (IsFileLocked(file))
+                                {
+                                    Thread.Sleep(500);
+                                }
+                                DirectoryCopy(directory.FullName, myPath, true);
+                            }
+                        }
+                    }
+                }
 
 
                 #region test
-
-                DirectoryInfo directory = new DirectoryInfo();
-
 
 
                 //DirectoryInfo[] destDirs = new DirectoryInfo(myPath).GetDirectories();
@@ -149,6 +191,38 @@ namespace TestFileSync
                     }
                 }
                 return false;
+            }
+
+            private static void DirectoryCopy(string sourceDir, string destDir, bool copySubDirs)
+            {
+                DirectoryInfo directoryInfo = new DirectoryInfo(sourceDir);
+
+                if (!directoryInfo.Exists)
+                {
+                    throw new DirectoryNotFoundException();
+                }
+
+                DirectoryInfo[] directories = directoryInfo.GetDirectories();
+
+                Directory.CreateDirectory(destDir);
+
+                FileInfo[] files = directoryInfo.GetFiles();
+
+                foreach (FileInfo file in files)
+                {
+                    string tempPath = Path.Combine(destDir, file.Name);
+
+                    file.CopyTo(tempPath, false);
+                }
+
+                if (copySubDirs)
+                {
+                    foreach (DirectoryInfo subdir in directories)
+                    {
+                        string tempPath = Path.Combine(destDir, subdir.Name);
+                        DirectoryCopy(subdir.FullName, tempPath, copySubDirs);
+                    }
+                }
             }
 
             private static ObservableCollection<GetPathFromXML> GetPathXML(string confPath)
